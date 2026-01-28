@@ -65,6 +65,32 @@
             font-size: 16px;
         }
 
+        .server-select {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .server-select button {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .server-select button:hover {
+            background: #f0f0f0;
+        }
+
+        .server-select button.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
         .server-info input {
             width: 100%;
             padding: 10px;
@@ -72,6 +98,7 @@
             border-radius: 5px;
             font-family: monospace;
             font-size: 14px;
+            margin-bottom: 10px;
         }
 
         .controls {
@@ -95,7 +122,13 @@
             gap: 8px;
         }
 
-        button:hover {
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        button:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         }
@@ -105,7 +138,7 @@
             color: white;
         }
 
-        #startCall:hover {
+        #startCall:hover:not(:disabled) {
             background: #38a169;
         }
 
@@ -114,7 +147,7 @@
             color: white;
         }
 
-        #answerCall:hover {
+        #answerCall:hover:not(:disabled) {
             background: #3182ce;
         }
 
@@ -123,7 +156,7 @@
             color: white;
         }
 
-        #hangup:hover {
+        #hangup:hover:not(:disabled) {
             background: #e53e3e;
         }
 
@@ -133,6 +166,19 @@
             border-radius: 10px;
             margin-top: 20px;
             border-left: 4px solid #48bb78;
+            min-height: 100px;
+        }
+
+        .status.error {
+            border-left-color: #f56565;
+        }
+
+        .status.connecting {
+            border-left-color: #4299e1;
+        }
+
+        .status.connected {
+            border-left-color: #48bb78;
         }
 
         .status h3 {
@@ -146,6 +192,16 @@
             font-size: 14px;
             color: #555;
             line-height: 1.5;
+        }
+
+        .error-details {
+            background: #fee;
+            color: #c00;
+            padding: 8px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 12px;
+            font-family: monospace;
         }
 
         .audio-controls {
@@ -205,6 +261,45 @@
             from { transform: scale(1); }
             to { transform: scale(1.05); }
         }
+
+        .server-status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .server-status.connected {
+            background: #48bb78;
+        }
+
+        .server-status.connecting {
+            background: #4299e1;
+            animation: pulse 1s infinite;
+        }
+
+        .server-status.disconnected {
+            background: #f56565;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .debug-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            font-size: 12px;
+            color: #666;
+            font-family: monospace;
+            max-height: 100px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -216,13 +311,21 @@
         
         <div class="content">
             <div class="server-info">
-                <h3>📡 Signaling Server</h3>
+                <h3>
+                    <span class="server-status disconnected" id="serverStatus"></span>
+                    📡 Signaling Server
+                </h3>
+                <div class="server-select">
+                    <button onclick="selectServer('public')" class="active">🌐 Public Server</button>
+                    <button onclick="selectServer('local')">💻 Local Server</button>
+                    <button onclick="selectServer('custom')">🔧 Custom</button>
+                </div>
                 <input type="text" id="serverUrl" 
                        value="wss://webrtc-signaling-server.glitch.me" 
                        placeholder="Enter WebSocket URL">
-                <p style="margin-top: 8px; font-size: 12px; color: #666;">
-                    Using public Glitch server. For local testing, run the included signaling server.
-                </p>
+                <button onclick="testConnection()" style="padding: 8px; font-size: 14px; margin-top: 5px;">
+                    🔍 Test Connection
+                </button>
             </div>
 
             <div class="controls">
@@ -240,7 +343,7 @@
                 </button>
             </div>
 
-            <div class="audio-controls">
+            <div class="audio-controls hidden" id="audioControls">
                 <div class="slider-container">
                     <label for="micVolume">🎤 Microphone Volume</label>
                     <input type="range" id="micVolume" min="0" max="200" value="100">
@@ -251,9 +354,11 @@
                 </div>
             </div>
 
-            <div class="status">
+            <div class="status" id="statusBox">
                 <h3>Status</h3>
-                <div id="statusText">Ready to connect. Click "Start Call" to begin.</div>
+                <div id="statusText">Ready to connect. Select a server and click "Start Call" to begin.</div>
+                <div class="error-details hidden" id="errorDetails"></div>
+                <div class="debug-info hidden" id="debugInfo"></div>
             </div>
         </div>
     </div>
@@ -288,6 +393,7 @@
                 this.websocket = null;
                 this.isCaller = false;
                 this.isInCall = false;
+                this.isConnecting = false;
 
                 // Audio elements
                 this.ringtone = document.getElementById('ringtone');
@@ -301,13 +407,32 @@
                     hangup: document.getElementById('hangup'),
                     serverUrl: document.getElementById('serverUrl'),
                     statusText: document.getElementById('statusText'),
+                    statusBox: document.getElementById('statusBox'),
+                    errorDetails: document.getElementById('errorDetails'),
+                    debugInfo: document.getElementById('debugInfo'),
+                    serverStatus: document.getElementById('serverStatus'),
                     micVolume: document.getElementById('micVolume'),
-                    speakerVolume: document.getElementById('speakerVolume')
+                    speakerVolume: document.getElementById('speakerVolume'),
+                    audioControls: document.getElementById('audioControls')
                 };
+
+                // Public signaling servers (fallback options)
+                this.publicServers = [
+                    'wss://webrtc-signaling-server.glitch.me',
+                    'wss://webrtc-signal-server.onrender.com',
+                    'ws://localhost:8080'
+                ];
+
+                // Current server index
+                this.currentServerIndex = 0;
+
+                // Debug logs
+                this.debugLogs = [];
 
                 // Initialize
                 this.setupEventListeners();
                 this.updateStatus('Ready to connect');
+                this.updateServerStatus('disconnected');
             }
 
             setupEventListeners() {
@@ -335,15 +460,41 @@
                 });
             }
 
+            logDebug(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                this.debugLogs.push(`[${timestamp}] ${message}`);
+                if (this.debugLogs.length > 10) {
+                    this.debugLogs.shift();
+                }
+                
+                if (this.elements.debugInfo.classList.contains('hidden')) {
+                    this.elements.debugInfo.classList.remove('hidden');
+                }
+                this.elements.debugInfo.innerHTML = this.debugLogs.join('<br>');
+                this.elements.debugInfo.scrollTop = this.elements.debugInfo.scrollHeight;
+                
+                console.log(message);
+            }
+
             async startCall() {
                 try {
+                    if (this.isConnecting) {
+                        this.updateStatus('Already connecting...');
+                        return;
+                    }
+
+                    this.isConnecting = true;
                     this.updateStatus('Starting call...');
+                    this.logDebug('Start call initiated');
+                    
+                    // Disable start button while connecting
+                    this.elements.startCall.disabled = true;
                     this.isCaller = true;
                     
-                    // Connect to signaling server
-                    await this.connectWebSocket();
+                    // Get microphone access first
+                    this.logDebug('Requesting microphone access...');
+                    this.updateStatus('Requesting microphone access...');
                     
-                    // Get microphone access
                     this.localStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             echoCancellation: true,
@@ -353,14 +504,24 @@
                             channelCount: 1
                         },
                         video: false
+                    }).catch(err => {
+                        throw new Error(`Microphone access denied: ${err.message}`);
                     });
                     
+                    this.logDebug('Microphone access granted');
+                    this.updateStatus('Microphone ready. Connecting to signaling server...');
+                    
+                    // Connect to signaling server with retry logic
+                    await this.connectWebSocket();
+                    
+                    this.logDebug('Creating peer connection...');
                     // Create peer connection
                     this.peerConnection = new RTCPeerConnection(this.config);
                     
                     // Add local stream to connection
                     this.localStream.getTracks().forEach(track => {
                         this.peerConnection.addTrack(track, this.localStream);
+                        this.logDebug(`Added ${track.kind} track to peer connection`);
                     });
                     
                     // Setup data channel for signaling
@@ -370,33 +531,55 @@
                     // Setup event handlers
                     this.setupPeerConnectionEvents();
                     
+                    this.logDebug('Creating offer...');
                     // Create and send offer
                     const offer = await this.peerConnection.createOffer({
                         offerToReceiveAudio: true
                     });
                     
                     await this.peerConnection.setLocalDescription(offer);
+                    this.logDebug('Offer created, setting local description');
                     
                     // Send offer through WebSocket
-                    this.websocket.send(JSON.stringify({
-                        type: 'offer',
-                        sdp: offer.sdp
-                    }));
+                    if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                        this.websocket.send(JSON.stringify({
+                            type: 'offer',
+                            sdp: offer.sdp
+                        }));
+                        this.logDebug('Offer sent via WebSocket');
+                    } else {
+                        throw new Error('WebSocket not connected');
+                    }
                     
                     this.updateStatus('Calling... Waiting for answer');
                     this.showCallControls();
+                    this.isConnecting = false;
                     
                 } catch (error) {
                     console.error('Error starting call:', error);
-                    this.updateStatus(`Error: ${error.message}`);
+                    this.logDebug(`Error: ${error.message}`);
+                    this.updateStatus(`Error: ${error.message}`, true);
+                    this.showErrorDetails(error);
                     this.reset();
+                    this.isConnecting = false;
+                    this.elements.startCall.disabled = false;
                 }
+            }
+
+            showErrorDetails(error) {
+                this.elements.errorDetails.classList.remove('hidden');
+                this.elements.errorDetails.innerHTML = `
+                    <strong>Error Details:</strong><br>
+                    ${error.name}: ${error.message}<br>
+                    <small>Check browser console for more details</small>
+                `;
             }
 
             async answerCall() {
                 try {
                     this.stopRinging();
                     this.updateStatus('Answering call...');
+                    this.logDebug('Answering call');
                     
                     // Get microphone access
                     this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -428,6 +611,10 @@
                     this.setupPeerConnectionEvents();
                     
                     // Set remote description from offer
+                    if (!this.receivedOffer) {
+                        throw new Error('No offer received');
+                    }
+                    
                     await this.peerConnection.setRemoteDescription(
                         new RTCSessionDescription(this.receivedOffer)
                     );
@@ -436,10 +623,12 @@
                     const answer = await this.peerConnection.createAnswer();
                     await this.peerConnection.setLocalDescription(answer);
                     
-                    this.websocket.send(JSON.stringify({
-                        type: 'answer',
-                        sdp: answer.sdp
-                    }));
+                    if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                        this.websocket.send(JSON.stringify({
+                            type: 'answer',
+                            sdp: answer.sdp
+                        }));
+                    }
                     
                     this.isInCall = true;
                     this.updateStatus('Call connected - Speak now!');
@@ -447,13 +636,22 @@
                     
                 } catch (error) {
                     console.error('Error answering call:', error);
-                    this.updateStatus(`Error: ${error.message}`);
+                    this.updateStatus(`Error: ${error.message}`, true);
+                    this.showErrorDetails(error);
                     this.reset();
                 }
             }
 
             hangup() {
                 this.updateStatus('Ending call...');
+                this.logDebug('Hanging up call');
+                
+                // Send hangup message
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                    this.websocket.send(JSON.stringify({
+                        type: 'hangup'
+                    }));
+                }
                 
                 // Close peer connection
                 if (this.peerConnection) {
@@ -476,38 +674,60 @@
                 // Reset UI
                 this.reset();
                 this.updateStatus('Call ended. Ready for new call.');
+                this.updateServerStatus('disconnected');
             }
 
             connectWebSocket() {
                 return new Promise((resolve, reject) => {
                     const serverUrl = this.elements.serverUrl.value;
+                    this.logDebug(`Connecting to WebSocket: ${serverUrl}`);
+                    this.updateStatus('Connecting to signaling server...');
+                    this.updateServerStatus('connecting');
+                    
                     this.websocket = new WebSocket(serverUrl);
                     
+                    // Set timeout for connection
+                    const timeout = setTimeout(() => {
+                        if (this.websocket.readyState !== WebSocket.OPEN) {
+                            this.websocket.close();
+                            reject(new Error('Connection timeout - server not responding'));
+                        }
+                    }, 10000);
+                    
                     this.websocket.onopen = () => {
+                        clearTimeout(timeout);
+                        this.logDebug('WebSocket connected successfully');
                         this.updateStatus('Connected to signaling server');
+                        this.updateServerStatus('connected');
                         resolve();
                     };
                     
                     this.websocket.onerror = (error) => {
-                        this.updateStatus('WebSocket error. Using fallback servers...');
-                        reject(error);
+                        clearTimeout(timeout);
+                        this.logDebug(`WebSocket error: ${error}`);
+                        this.updateServerStatus('disconnected');
+                        reject(new Error('Failed to connect to signaling server'));
                     };
                     
-                    this.websocket.onmessage = (event) => {
-                        this.handleSignalingMessage(event.data);
-                    };
-                    
-                    this.websocket.onclose = () => {
+                    this.websocket.onclose = (event) => {
+                        clearTimeout(timeout);
+                        this.logDebug(`WebSocket closed: ${event.code} - ${event.reason}`);
+                        this.updateServerStatus('disconnected');
                         if (this.isInCall) {
                             this.updateStatus('Connection lost');
                             this.hangup();
                         }
+                    };
+                    
+                    this.websocket.onmessage = (event) => {
+                        this.handleSignalingMessage(event.data);
                     };
                 });
             }
 
             handleSignalingMessage(message) {
                 try {
+                    this.logDebug(`Received message: ${message.substring(0, 100)}...`);
                     const data = JSON.parse(message);
                     
                     switch (data.type) {
@@ -527,6 +747,9 @@
                                 ).then(() => {
                                     this.isInCall = true;
                                     this.updateStatus('Call connected - Speak now!');
+                                    this.logDebug('Remote description set, call connected');
+                                }).catch(err => {
+                                    this.logDebug(`Error setting remote description: ${err}`);
                                 });
                             }
                             break;
@@ -535,7 +758,9 @@
                             if (this.peerConnection && data.candidate) {
                                 this.peerConnection.addIceCandidate(
                                     new RTCIceCandidate(data.candidate)
-                                ).catch(console.error);
+                                ).catch(err => {
+                                    this.logDebug(`Error adding ICE candidate: ${err}`);
+                                });
                             }
                             break;
                             
@@ -544,7 +769,7 @@
                             break;
                     }
                 } catch (error) {
-                    console.error('Error handling signaling message:', error);
+                    this.logDebug(`Error handling message: ${error}`);
                 }
             }
 
@@ -561,6 +786,7 @@
                 
                 // Track reception
                 this.peerConnection.ontrack = (event) => {
+                    this.logDebug('Received remote track');
                     if (event.streams && event.streams[0]) {
                         // Clear previous tracks
                         this.remoteStream.getTracks().forEach(track => this.remoteStream.removeTrack(track));
@@ -569,14 +795,23 @@
                         event.streams[0].getTracks().forEach(track => {
                             this.remoteStream.addTrack(track);
                         });
+                        
+                        // Play remote audio
+                        this.remoteAudio.play().catch(err => {
+                            this.logDebug(`Error playing remote audio: ${err}`);
+                        });
                     }
                 };
                 
                 // Connection state changes
                 this.peerConnection.onconnectionstatechange = () => {
-                    switch (this.peerConnection.connectionState) {
+                    const state = this.peerConnection.connectionState;
+                    this.logDebug(`Connection state: ${state}`);
+                    
+                    switch (state) {
                         case 'connected':
                             this.updateStatus('Connected - Call active');
+                            this.elements.audioControls.classList.remove('hidden');
                             break;
                         case 'disconnected':
                         case 'failed':
@@ -591,7 +826,10 @@
                 
                 // ICE connection state
                 this.peerConnection.oniceconnectionstatechange = () => {
-                    if (this.peerConnection.iceConnectionState === 'failed') {
+                    const state = this.peerConnection.iceConnectionState;
+                    this.logDebug(`ICE connection state: ${state}`);
+                    
+                    if (state === 'failed') {
                         this.peerConnection.restartIce();
                     }
                 };
@@ -599,21 +837,23 @@
 
             setupDataChannel() {
                 this.dataChannel.onopen = () => {
-                    console.log('Data channel opened');
+                    this.logDebug('Data channel opened');
                 };
                 
                 this.dataChannel.onmessage = (event) => {
-                    console.log('Received data:', event.data);
+                    this.logDebug(`Data channel message: ${event.data}`);
                 };
                 
                 this.dataChannel.onclose = () => {
-                    console.log('Data channel closed');
+                    this.logDebug('Data channel closed');
                 };
             }
 
             playRinging() {
                 this.ringtone.currentTime = 0;
-                this.ringtone.play().catch(console.error);
+                this.ringtone.play().catch(err => {
+                    this.logDebug(`Error playing ringtone: ${err}`);
+                });
                 this.elements.answerCall.classList.add('ringing');
             }
 
@@ -633,11 +873,13 @@
                 this.elements.startCall.classList.add('hidden');
                 this.elements.answerCall.classList.add('hidden');
                 this.elements.hangup.classList.remove('hidden');
+                this.elements.startCall.disabled = false;
             }
 
             reset() {
                 this.isCaller = false;
                 this.isInCall = false;
+                this.isConnecting = false;
                 this.receivedOffer = null;
                 
                 // Reset UI
@@ -645,6 +887,9 @@
                 this.elements.answerCall.classList.add('hidden');
                 this.elements.hangup.classList.add('hidden');
                 this.elements.answerCall.classList.remove('ringing');
+                this.elements.audioControls.classList.add('hidden');
+                this.elements.startCall.disabled = false;
+                this.elements.errorDetails.classList.add('hidden');
                 
                 // Stop ringing
                 this.stopRinging();
@@ -653,9 +898,88 @@
                 this.remoteStream.getTracks().forEach(track => this.remoteStream.removeTrack(track));
             }
 
-            updateStatus(message) {
+            updateStatus(message, isError = false) {
                 this.elements.statusText.textContent = message;
-                console.log('Status:', message);
+                
+                // Update status box styling
+                this.elements.statusBox.classList.remove('error', 'connecting', 'connected');
+                
+                if (isError) {
+                    this.elements.statusBox.classList.add('error');
+                } else if (message.includes('Connecting') || message.includes('Starting')) {
+                    this.elements.statusBox.classList.add('connecting');
+                } else if (message.includes('Connected') || message.includes('Call connected')) {
+                    this.elements.statusBox.classList.add('connected');
+                }
+                
+                this.logDebug(`Status: ${message}`);
+            }
+
+            updateServerStatus(status) {
+                this.elements.serverStatus.className = 'server-status ' + status;
+            }
+
+            async testConnection() {
+                const url = this.elements.serverUrl.value;
+                this.updateStatus(`Testing connection to ${url}...`);
+                this.updateServerStatus('connecting');
+                
+                try {
+                    const ws = new WebSocket(url);
+                    
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            ws.close();
+                            reject(new Error('Connection timeout'));
+                        }, 5000);
+                        
+                        ws.onopen = () => {
+                            clearTimeout(timeout);
+                            ws.close();
+                            resolve();
+                        };
+                        
+                        ws.onerror = (error) => {
+                            clearTimeout(timeout);
+                            reject(new Error('Connection failed'));
+                        };
+                    });
+                    
+                    this.updateStatus('Connection test successful!');
+                    this.updateServerStatus('connected');
+                } catch (error) {
+                    this.updateStatus(`Connection test failed: ${error.message}`, true);
+                    this.updateServerStatus('disconnected');
+                }
+            }
+        }
+
+        // Global functions for server selection
+        function selectServer(type) {
+            const buttons = document.querySelectorAll('.server-select button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            const serverUrl = document.getElementById('serverUrl');
+            
+            switch(type) {
+                case 'public':
+                    serverUrl.value = 'wss://webrtc-signaling-server.glitch.me';
+                    break;
+                case 'local':
+                    serverUrl.value = 'ws://localhost:8080';
+                    break;
+                case 'custom':
+                    serverUrl.value = '';
+                    break;
+            }
+            
+            window.audioCall.updateServerStatus('disconnected');
+        }
+
+        function testConnection() {
+            if (window.audioCall) {
+                window.audioCall.testConnection();
             }
         }
 
