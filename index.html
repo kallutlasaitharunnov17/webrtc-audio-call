@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Audio Call</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 500px;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .server-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .server-info h3 {
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .server-info input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        #startCall {
+            background: #48bb78;
+            color: white;
+        }
+
+        #startCall:hover {
+            background: #38a169;
+        }
+
+        #answerCall {
+            background: #4299e1;
+            color: white;
+        }
+
+        #answerCall:hover {
+            background: #3182ce;
+        }
+
+        #hangup {
+            background: #f56565;
+            color: white;
+        }
+
+        #hangup:hover {
+            background: #e53e3e;
+        }
+
+        .status {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            border-left: 4px solid #48bb78;
+        }
+
+        .status h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        #statusText {
+            font-family: monospace;
+            font-size: 14px;
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .audio-controls {
+            margin-top: 20px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        .slider-container {
+            margin: 10px 0;
+        }
+
+        .slider-container label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-size: 14px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #ddd;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+
+        input[type="range"]:hover {
+            opacity: 1;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+
+        .icon {
+            font-size: 18px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .ringing {
+            animation: ring 0.5s infinite alternate;
+        }
+
+        @keyframes ring {
+            from { transform: scale(1); }
+            to { transform: scale(1.05); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 WebRTC Audio Call</h1>
+            <p>Peer-to-peer audio calling in your browser</p>
+        </div>
+        
+        <div class="content">
+            <div class="server-info">
+                <h3>📡 Signaling Server</h3>
+                <input type="text" id="serverUrl" 
+                       value="wss://webrtc-signaling-server.glitch.me" 
+                       placeholder="Enter WebSocket URL">
+                <p style="margin-top: 8px; font-size: 12px; color: #666;">
+                    Using public Glitch server. For local testing, run the included signaling server.
+                </p>
+            </div>
+
+            <div class="controls">
+                <button id="startCall">
+                    <span class="icon">📞</span>
+                    Start Call
+                </button>
+                <button id="answerCall" class="hidden">
+                    <span class="icon">🔊</span>
+                    Answer Call
+                </button>
+                <button id="hangup" class="hidden">
+                    <span class="icon">📴</span>
+                    Hang Up
+                </button>
+            </div>
+
+            <div class="audio-controls">
+                <div class="slider-container">
+                    <label for="micVolume">🎤 Microphone Volume</label>
+                    <input type="range" id="micVolume" min="0" max="200" value="100">
+                </div>
+                <div class="slider-container">
+                    <label for="speakerVolume">🔊 Speaker Volume</label>
+                    <input type="range" id="speakerVolume" min="0" max="200" value="100">
+                </div>
+            </div>
+
+            <div class="status">
+                <h3>Status</h3>
+                <div id="statusText">Ready to connect. Click "Start Call" to begin.</div>
+            </div>
+        </div>
+    </div>
+
+    <audio id="ringtone" loop>
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-phone-call-ringing-1007.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="remoteAudio" autoplay></audio>
+
+    <script>
+        class WebRTCAudioCall {
+            constructor() {
+                // Configuration
+                this.config = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' },
+                        { urls: 'stun:stun4.l.google.com:19302' }
+                    ],
+                    sdpSemantics: 'unified-plan'
+                };
+
+                // WebRTC objects
+                this.peerConnection = null;
+                this.localStream = null;
+                this.remoteStream = new MediaStream();
+                this.dataChannel = null;
+
+                // Signaling
+                this.websocket = null;
+                this.isCaller = false;
+                this.isInCall = false;
+
+                // Audio elements
+                this.ringtone = document.getElementById('ringtone');
+                this.remoteAudio = document.getElementById('remoteAudio');
+                this.remoteAudio.srcObject = this.remoteStream;
+
+                // DOM elements
+                this.elements = {
+                    startCall: document.getElementById('startCall'),
+                    answerCall: document.getElementById('answerCall'),
+                    hangup: document.getElementById('hangup'),
+                    serverUrl: document.getElementById('serverUrl'),
+                    statusText: document.getElementById('statusText'),
+                    micVolume: document.getElementById('micVolume'),
+                    speakerVolume: document.getElementById('speakerVolume')
+                };
+
+                // Initialize
+                this.setupEventListeners();
+                this.updateStatus('Ready to connect');
+            }
+
+            setupEventListeners() {
+                this.elements.startCall.addEventListener('click', () => this.startCall());
+                this.elements.answerCall.addEventListener('click', () => this.answerCall());
+                this.elements.hangup.addEventListener('click', () => this.hangup());
+                
+                this.elements.micVolume.addEventListener('input', (e) => {
+                    if (this.localStream) {
+                        const audioTrack = this.localStream.getAudioTracks()[0];
+                        if (audioTrack) {
+                            const gainNode = audioTrack.getCapabilities().volume || {};
+                            if (gainNode.max) {
+                                const volume = e.target.value / 100;
+                                audioTrack.applyConstraints({
+                                    advanced: [{ volume: volume }]
+                                }).catch(console.error);
+                            }
+                        }
+                    }
+                });
+
+                this.elements.speakerVolume.addEventListener('input', (e) => {
+                    this.remoteAudio.volume = e.target.value / 100;
+                });
+            }
+
+            async startCall() {
+                try {
+                    this.updateStatus('Starting call...');
+                    this.isCaller = true;
+                    
+                    // Connect to signaling server
+                    await this.connectWebSocket();
+                    
+                    // Get microphone access
+                    this.localStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: 48000,
+                            channelCount: 1
+                        },
+                        video: false
+                    });
+                    
+                    // Create peer connection
+                    this.peerConnection = new RTCPeerConnection(this.config);
+                    
+                    // Add local stream to connection
+                    this.localStream.getTracks().forEach(track => {
+                        this.peerConnection.addTrack(track, this.localStream);
+                    });
+                    
+                    // Setup data channel for signaling
+                    this.dataChannel = this.peerConnection.createDataChannel('chat');
+                    this.setupDataChannel();
+                    
+                    // Setup event handlers
+                    this.setupPeerConnectionEvents();
+                    
+                    // Create and send offer
+                    const offer = await this.peerConnection.createOffer({
+                        offerToReceiveAudio: true
+                    });
+                    
+                    await this.peerConnection.setLocalDescription(offer);
+                    
+                    // Send offer through WebSocket
+                    this.websocket.send(JSON.stringify({
+                        type: 'offer',
+                        sdp: offer.sdp
+                    }));
+                    
+                    this.updateStatus('Calling... Waiting for answer');
+                    this.showCallControls();
+                    
+                } catch (error) {
+                    console.error('Error starting call:', error);
+                    this.updateStatus(`Error: ${error.message}`);
+                    this.reset();
+                }
+            }
+
+            async answerCall() {
+                try {
+                    this.stopRinging();
+                    this.updateStatus('Answering call...');
+                    
+                    // Get microphone access
+                    this.localStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: 48000,
+                            channelCount: 1
+                        },
+                        video: false
+                    });
+                    
+                    // Create peer connection
+                    this.peerConnection = new RTCPeerConnection(this.config);
+                    
+                    // Add local stream
+                    this.localStream.getTracks().forEach(track => {
+                        this.peerConnection.addTrack(track, this.localStream);
+                    });
+                    
+                    // Setup data channel
+                    this.peerConnection.ondatachannel = (event) => {
+                        this.dataChannel = event.channel;
+                        this.setupDataChannel();
+                    };
+                    
+                    // Setup event handlers
+                    this.setupPeerConnectionEvents();
+                    
+                    // Set remote description from offer
+                    await this.peerConnection.setRemoteDescription(
+                        new RTCSessionDescription(this.receivedOffer)
+                    );
+                    
+                    // Create and send answer
+                    const answer = await this.peerConnection.createAnswer();
+                    await this.peerConnection.setLocalDescription(answer);
+                    
+                    this.websocket.send(JSON.stringify({
+                        type: 'answer',
+                        sdp: answer.sdp
+                    }));
+                    
+                    this.isInCall = true;
+                    this.updateStatus('Call connected - Speak now!');
+                    this.showCallControls();
+                    
+                } catch (error) {
+                    console.error('Error answering call:', error);
+                    this.updateStatus(`Error: ${error.message}`);
+                    this.reset();
+                }
+            }
+
+            hangup() {
+                this.updateStatus('Ending call...');
+                
+                // Close peer connection
+                if (this.peerConnection) {
+                    this.peerConnection.close();
+                    this.peerConnection = null;
+                }
+                
+                // Stop local stream
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                    this.localStream = null;
+                }
+                
+                // Close WebSocket
+                if (this.websocket) {
+                    this.websocket.close();
+                    this.websocket = null;
+                }
+                
+                // Reset UI
+                this.reset();
+                this.updateStatus('Call ended. Ready for new call.');
+            }
+
+            connectWebSocket() {
+                return new Promise((resolve, reject) => {
+                    const serverUrl = this.elements.serverUrl.value;
+                    this.websocket = new WebSocket(serverUrl);
+                    
+                    this.websocket.onopen = () => {
+                        this.updateStatus('Connected to signaling server');
+                        resolve();
+                    };
+                    
+                    this.websocket.onerror = (error) => {
+                        this.updateStatus('WebSocket error. Using fallback servers...');
+                        reject(error);
+                    };
+                    
+                    this.websocket.onmessage = (event) => {
+                        this.handleSignalingMessage(event.data);
+                    };
+                    
+                    this.websocket.onclose = () => {
+                        if (this.isInCall) {
+                            this.updateStatus('Connection lost');
+                            this.hangup();
+                        }
+                    };
+                });
+            }
+
+            handleSignalingMessage(message) {
+                try {
+                    const data = JSON.parse(message);
+                    
+                    switch (data.type) {
+                        case 'offer':
+                            if (!this.isCaller && !this.isInCall) {
+                                this.receivedOffer = data;
+                                this.playRinging();
+                                this.showAnswerButton();
+                                this.updateStatus('Incoming call! Click "Answer Call" to accept.');
+                            }
+                            break;
+                            
+                        case 'answer':
+                            if (this.isCaller && this.peerConnection) {
+                                this.peerConnection.setRemoteDescription(
+                                    new RTCSessionDescription(data)
+                                ).then(() => {
+                                    this.isInCall = true;
+                                    this.updateStatus('Call connected - Speak now!');
+                                });
+                            }
+                            break;
+                            
+                        case 'candidate':
+                            if (this.peerConnection && data.candidate) {
+                                this.peerConnection.addIceCandidate(
+                                    new RTCIceCandidate(data.candidate)
+                                ).catch(console.error);
+                            }
+                            break;
+                            
+                        case 'hangup':
+                            this.hangup();
+                            break;
+                    }
+                } catch (error) {
+                    console.error('Error handling signaling message:', error);
+                }
+            }
+
+            setupPeerConnectionEvents() {
+                // ICE candidate handling
+                this.peerConnection.onicecandidate = (event) => {
+                    if (event.candidate && this.websocket) {
+                        this.websocket.send(JSON.stringify({
+                            type: 'candidate',
+                            candidate: event.candidate
+                        }));
+                    }
+                };
+                
+                // Track reception
+                this.peerConnection.ontrack = (event) => {
+                    if (event.streams && event.streams[0]) {
+                        // Clear previous tracks
+                        this.remoteStream.getTracks().forEach(track => this.remoteStream.removeTrack(track));
+                        
+                        // Add new tracks
+                        event.streams[0].getTracks().forEach(track => {
+                            this.remoteStream.addTrack(track);
+                        });
+                    }
+                };
+                
+                // Connection state changes
+                this.peerConnection.onconnectionstatechange = () => {
+                    switch (this.peerConnection.connectionState) {
+                        case 'connected':
+                            this.updateStatus('Connected - Call active');
+                            break;
+                        case 'disconnected':
+                        case 'failed':
+                            this.updateStatus('Connection lost');
+                            setTimeout(() => this.hangup(), 2000);
+                            break;
+                        case 'closed':
+                            this.reset();
+                            break;
+                    }
+                };
+                
+                // ICE connection state
+                this.peerConnection.oniceconnectionstatechange = () => {
+                    if (this.peerConnection.iceConnectionState === 'failed') {
+                        this.peerConnection.restartIce();
+                    }
+                };
+            }
+
+            setupDataChannel() {
+                this.dataChannel.onopen = () => {
+                    console.log('Data channel opened');
+                };
+                
+                this.dataChannel.onmessage = (event) => {
+                    console.log('Received data:', event.data);
+                };
+                
+                this.dataChannel.onclose = () => {
+                    console.log('Data channel closed');
+                };
+            }
+
+            playRinging() {
+                this.ringtone.currentTime = 0;
+                this.ringtone.play().catch(console.error);
+                this.elements.answerCall.classList.add('ringing');
+            }
+
+            stopRinging() {
+                this.ringtone.pause();
+                this.ringtone.currentTime = 0;
+                this.elements.answerCall.classList.remove('ringing');
+            }
+
+            showAnswerButton() {
+                this.elements.startCall.classList.add('hidden');
+                this.elements.answerCall.classList.remove('hidden');
+                this.elements.hangup.classList.remove('hidden');
+            }
+
+            showCallControls() {
+                this.elements.startCall.classList.add('hidden');
+                this.elements.answerCall.classList.add('hidden');
+                this.elements.hangup.classList.remove('hidden');
+            }
+
+            reset() {
+                this.isCaller = false;
+                this.isInCall = false;
+                this.receivedOffer = null;
+                
+                // Reset UI
+                this.elements.startCall.classList.remove('hidden');
+                this.elements.answerCall.classList.add('hidden');
+                this.elements.hangup.classList.add('hidden');
+                this.elements.answerCall.classList.remove('ringing');
+                
+                // Stop ringing
+                this.stopRinging();
+                
+                // Clear remote audio
+                this.remoteStream.getTracks().forEach(track => this.remoteStream.removeTrack(track));
+            }
+
+            updateStatus(message) {
+                this.elements.statusText.textContent = message;
+                console.log('Status:', message);
+            }
+        }
+
+        // Initialize application when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            window.audioCall = new WebRTCAudioCall();
+        });
+    </script>
+</body>
+</html>
